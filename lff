@@ -1,0 +1,41 @@
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geni-Health | Loading...</title>
+
+    </head>
+    <body style="display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif; background:#f8fafc;">
+    <div style="text-align:center;">
+    <div style="border:4px solid #f3f3f3; border-top:4px solid #6366f1; border-radius:50%; width:30px; height:30px; animation:spin 1s linear infinite; margin:0 auto 15px;"></div>
+    <p style="color:#64748b;">กำลังเตรียมข้อมูลสุขภาพระดับพรีเมียม...</p>
+    <div id="cxuserid"></div>
+    </div>
+    <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
+    </body>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script>
+            async function main() {
+            const aa= document.getElementById("cxuserid")
+                // 1. ใส่ LIFF ID ของคุณ
+            try{
+                await liff.init({ liffId: "2009499939-QORPCSTY" }); 
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                    aa.innerHTML="Islogin";
+                } else {
+                    const profile = await liff.getProfile();
+                    const userId = profile.userId;  
+                    aa.innerHTML=userId;
+                    
+                    const n8nFormUrl = "https://orawan.app.n8n.cloud/form/369a7d68-bca7-4635-bc87-e9ec82e60925";
+                    window.location.href = n8nFormUrl + "?userId=" + userId;
+                }
+            }catch(e){
+                aa.innerHTML=e;
+            }
+            }
+            main();
+    </script>
+    </html>
