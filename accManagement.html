@@ -3,14 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Wallet Management</title>
+    <title>Smart Wallet Pro - LINE Login Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700&display=swap');
         
         body { font-family: 'Kanit', sans-serif; background: #f8fafc; overflow: hidden; -webkit-tap-highlight-color: transparent; }
         .soft-grad { background: linear-gradient(135deg, #818cf8 0%, #a78bfa 100%); }
+        .line-green { background-color: #06C755; }
         #main-header { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); z-index: 40; position: relative; }
         .header-shrunk { padding: 1rem 1.5rem !important; border-radius: 0 0 1.5rem 1.5rem !important; }
         .summary-container { transition: all 0.4s ease; }
@@ -24,7 +28,7 @@
         .sticky-title { position: sticky; top: 0; z-index: 30; background: white; padding: 1rem 0; margin-bottom: 0.5rem; }
         
         /* Loading Overlay */
-        #loader { transition: opacity 0.3s ease; }
+        #loader { transition: opacity 0.3s ease; z-index: 999; }
         .hide-loader { opacity: 0; pointer-events: none; }
 
         ::-webkit-scrollbar { width: 0px; }
@@ -35,19 +39,33 @@
 </head>
 <body class="flex justify-center items-center min-h-screen relative">
 
-    <div id="loader" class="fixed inset-0 bg-white/80 backdrop-blur-sm z-[200] flex flex-col items-center justify-center hide-loader">
+    <div id="loader" class="fixed inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center">
         <i class="fas fa-circle-notch fa-spin text-4xl text-indigo-500 mb-4"></i>
-        <p class="text-slate-600 font-bold">กำลังซิงค์ข้อมูลกับ Database...</p>
+        <p id="loader-text" class="text-slate-600 font-bold">กำลังตรวจสอบระบบ LINE...</p>
     </div>
 
-    <div class="w-full max-w-md h-[95vh] bg-white shadow-2xl flex flex-col relative overflow-hidden sm:rounded-[3rem] border border-slate-100">
+    <div id="login-screen" class="fixed inset-0 bg-slate-900 flex flex-col items-center justify-center z-[100] hidden">
+        <div class="bg-white p-10 rounded-[3rem] shadow-2xl text-center max-w-sm w-11/12 animate-pop">
+            <i class="fas fa-wallet text-6xl text-indigo-500 mb-6"></i>
+            <h1 class="text-2xl font-black text-slate-800 mb-2">Smart Wallet Pro</h1>
+            <p class="text-slate-500 text-sm mb-8">เข้าสู่ระบบเพื่อจัดการรายรับรายจ่ายของคุณ</p>
+            <button onclick="liff.login()" class="w-full line-green text-white py-4 rounded-full font-bold shadow-lg hover:opacity-90 transition flex items-center justify-center gap-3">
+                <i class="fab fa-line text-2xl"></i> เข้าสู่ระบบด้วย LINE
+            </button>
+        </div>
+    </div>
+
+    <div id="app-screen" class="w-full max-w-md h-[95vh] bg-white shadow-2xl flex flex-col relative overflow-hidden sm:rounded-[3rem] border border-slate-100 hidden">
         
         <div id="main-header" class="p-8 soft-grad text-white rounded-b-[3rem] shadow-lg shrink-0">
             <div class="flex justify-between items-center mb-6 header-top">
                 <input type="month" id="current-cycle" onchange="render()" class="bg-white/20 border-none text-sm font-bold rounded-full px-4 py-1 focus:ring-0 cursor-pointer text-white">
-                <button onclick="openSettings()" class="bg-white/20 w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/30 transition">
-                    <i class="fas fa-cog"></i>
-                </button>
+                <div class="flex items-center gap-3">
+                    <img id="user-profile-img" src="" class="w-10 h-10 rounded-full border-2 border-white/50 object-cover" alt="Profile" onerror="this.style.display='none'">
+                    <button onclick="openSettings()" class="bg-white/20 w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/30 transition">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
             </div>
             
             <div class="summary-container">
@@ -158,13 +176,12 @@
 
     <script>
         // ==========================================
-        // 🔴 ตั้งค่า API ตรงนี้! 
+        // 🔴 ตั้งค่า API และ LIFF
         // ==========================================
         const API_BASE_URL = 'https://n8n.nex2gether.site/webhook/api/v1'; 
-        const urlParams = new URLSearchParams(window.location.search);
-        const CURRENT_UID = urlParams.get('uid') || '6d000a47-29ad-11f1-99a0-0ed3e82fa1a0'; // ถ้าไม่มีให้ใช้ usr-5555 เป็นค่าเริ่มต้น
-
-        // State ควบคุมข้อมูล
+        const LIFF_ID = '2009499939-W8xCco2X'; // <--- ⚠️ แก้ไขตรงนี้เป็น LIFF ID ของคุณ!
+        
+        let CURRENT_UID = ''; 
         let currentItems = [];
         let fixTemplates = [];
 
@@ -173,38 +190,91 @@
         const mainHeader = document.getElementById('main-header');
         const loader = document.getElementById('loader');
         
-        // ตั้งค่าย้อนหลังให้เป็นเดือนปัจจุบัน
         const today = new Date();
         monthInput.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
 
         // ==========================================
-        // 🛠️ API Helper Function (ตัวกลางสำหรับยิง API)
+        // 🟢 ระบบ Login ผ่าน LINE (LIFF)
+        // ==========================================
+        async function initializeApp() {
+            try {
+                // รอให้ LIFF เริ่มต้นทำงาน
+                await liff.init({ liffId: LIFF_ID });
+                
+                if (liff.isLoggedIn()) {
+                    // ดึงโปรไฟล์ LINE
+                    const profile = await liff.getProfile();
+                    CURRENT_UID = profile.userId; 
+                    document.getElementById('user-profile-img').src = profile.pictureUrl;
+                    
+                    // แจ้ง Backend เช็คบัญชี (ลงทะเบียนอัตโนมัติ)
+                    document.getElementById('loader-text').innerText = "กำลังเข้าสู่ระบบและซิงค์ข้อมูล...";
+                    await verifyUserWithBackend(profile);
+
+                    // ปิดหน้า Login, เปิดหน้าแอป
+                    document.getElementById('login-screen').classList.add('hidden');
+                    document.getElementById('app-screen').classList.remove('hidden');
+                    
+                    // ดึงข้อมูลการเงิน
+                    render(); 
+                } else {
+                    // ถ้ายังไม่ Login โชว์ปุ่มให้กด
+                    hideLoader();
+                    document.getElementById('login-screen').classList.remove('hidden');
+                }
+            } catch (err) {
+                console.error('LIFF Error:', err);
+                // Fallback กรณีไม่ได้เปิดใน LINE หรือ LIFF ID ผิด (เอาไว้ใช้ทดสอบในคอม)
+                CURRENT_UID = '6d000a47-29ad-11f1-99a0-0ed3e82fa1a0'; 
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('app-screen').classList.remove('hidden');
+                render();
+            }
+        }
+
+        async function verifyUserWithBackend(profile) {
+            try {
+                await fetch(`${API_BASE_URL}/auth/line`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        uid: profile.userId,
+                        displayName: profile.displayName
+                    })
+                });
+            } catch (error) {
+                console.error('Auth Error:', error);
+            }
+        }
+
+        // ==========================================
+        // 🛠️ API Helper
         // ==========================================
         async function apiCall(endpoint, method = 'GET', body = null) {
             showLoader();
             try {
+                // แนบ UID ไปกับ URL
+                let separator = endpoint.includes('?') ? '&' : '?';
+                let finalUrl = `${API_BASE_URL}${endpoint}${separator}uid=${CURRENT_UID}`;
+
                 const options = {
                     method,
                     headers: { 
                         'Content-Type': 'application/json',
-                        'X-User-ID': CURRENT_UID // ส่ง UID ลับไปกับ Header ป้องกันคนแฮก!
+                        'X-User-ID': CURRENT_UID 
                     }
                 };
                 if (body) options.body = JSON.stringify(body);
                 
-                const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+                const response = await fetch(finalUrl, options);
                 
-                if (!response.ok) {
-                    throw new Error(`API Error: ${response.status}`);
-                }
-
-                // ดักจับกรณีที่ n8n ไม่ได้ส่งอะไรกลับมา (เช่น ตอน DELETE)
+                if (!response.ok) throw new Error(`API Error: ${response.status}`);
                 const text = await response.text();
                 return text ? JSON.parse(text) : { status: 'success' };
 
             } catch (error) {
                 console.error('API Connect Error:', error);
-                alert('ไม่สามารถเชื่อมต่อฐานข้อมูลได้ กรุณาตรวจสอบลิงก์ Webhook n8n');
+                alert('ไม่สามารถเชื่อมต่อฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
                 return null;
             } finally {
                 hideLoader();
@@ -215,41 +285,36 @@
         function hideLoader() { loader.classList.add('hide-loader'); }
 
         // ==========================================
-        // 🔄 ฟังก์ชันหลัก: โหลดข้อมูลจาก Database
+        // 🔄 โหลดข้อมูล
         // ==========================================
         async function render() {
             const cycle = monthInput.value;
             
-            // 📡 ยิง API ดึงทั้ง 2 ตาราง
             const txData = await apiCall(`/transactions?cycle=${cycle}`);
             const fixData = await apiCall(`/fix-costs`); 
 
-            // จัดการข้อมูล Transactions
             if (Array.isArray(txData)) currentItems = txData; 
             else if (txData && Array.isArray(txData.data)) currentItems = txData.data; 
             else if (txData && txData.id) currentItems = [txData]; 
             else currentItems = []; 
             
-            // 🌟 จัดการข้อมูล Fix Cost Templates
             if (Array.isArray(fixData)) fixTemplates = fixData; 
             else if (fixData && Array.isArray(fixData.data)) fixTemplates = fixData.data; 
             else if (fixData && fixData.id) fixTemplates = [fixData]; 
             else fixTemplates = []; 
 
             updateUI(currentItems);
-            // 🌟 ให้วาดหน้าจอ Settings ใหม่ด้วยข้อมูลจาก DB
             renderSettingsList(); 
         }
 
         // ==========================================
-        // 🎨 ฟังก์ชันวาด UI
+        // 🎨 วาด UI หน้าหลัก
         // ==========================================
         function updateUI(items) {
             const listItems = document.getElementById('list-items');
             listItems.innerHTML = '';
             let inc = 0, exp = 0;
 
-            // Sort วันที่จากใหม่ไปเก่า
             items.sort((a,b) => new Date(b.tx_date) - new Date(a.tx_date));
 
             items.forEach(item => {
@@ -257,7 +322,6 @@
                 const amount = Number(item.amount);
                 if(isIncome) inc += amount; else exp += amount;
 
-                // การแยกวันที่จาก DB
                 const txDate = new Date(item.tx_date).toLocaleDateString('th-TH', {day:'2-digit', month:'short'});
 
                 const card = document.createElement('div');
@@ -285,17 +349,13 @@
                 listItems.appendChild(card);
             });
 
-            // อัปเดตตัวเลข
-            const formattedInc = `฿${inc.toLocaleString()}`;
-            const formattedExp = `฿${exp.toLocaleString()}`;
-            document.getElementById('total-income').innerText = formattedInc;
-            document.getElementById('mini-income').innerText = formattedInc;
-            document.getElementById('total-expense').innerText = formattedExp;
-            document.getElementById('mini-expense').innerText = formattedExp;
+            document.getElementById('total-income').innerText = `฿${inc.toLocaleString()}`;
+            document.getElementById('mini-income').innerText = `฿${inc.toLocaleString()}`;
+            document.getElementById('total-expense').innerText = `฿${exp.toLocaleString()}`;
+            document.getElementById('mini-expense').innerText = `฿${exp.toLocaleString()}`;
             document.getElementById('total-balance').innerText = `฿${(inc - exp).toLocaleString()}`;
             document.getElementById('transaction-count').innerText = `${items.length} รายการ`;
             
-            // Alert Fix Cost
             const hasFixThisMonth = items.some(i => i.type === 'fix-cost');
             const alertBox = document.getElementById('fix-cost-alert');
             alertBox.classList.toggle('hidden', hasFixThisMonth || fixTemplates.length === 0 || items.length === 0);
@@ -318,7 +378,7 @@
         }
 
         // ==========================================
-        // 💾 บันทึก/แก้ไขข้อมูล (POST / PUT)
+        // 💾 บันทึก แก้ไข ลบ (Transactions)
         // ==========================================
         async function saveItem() {
             const title = document.getElementById('in-title').value;
@@ -331,53 +391,44 @@
             if(!title || !amount) return;
 
             if (editId) {
-                // 📡 PUT: อัปเดตรายการเดิม
                 const payload = { 
-                    id: editId,  // ส่ง ID ไปด้วย
+                    id: editId,  
                     title, 
                     amount: parseFloat(amount), 
                     type, 
                     tx_date: document.getElementById('in-date').value, 
                     cycle: monthInput.value 
                 };
-                
                 await apiCall(`/transactions`, 'PUT', payload);
             } else {
-                // 📡 POST: สร้างรายการใหม่ (รวมแบบล่วงหน้า)
                 let newTransactions = [];
                 for (let i = 0; i < repeatMonths; i++) {
                     const targetDate = new Date(startDate);
                     targetDate.setMonth(startDate.getMonth() + i);
                     const cycle = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
-                    
                     newTransactions.push({
                         title: repeatMonths > 1 ? `${title} (${i+1}/${repeatMonths})` : title,
                         amount: parseFloat(amount),
                         type,
-                        tx_date: targetDate.toISOString().split('T')[0], // Database ใช้ tx_date
+                        tx_date: targetDate.toISOString().split('T')[0],
                         cycle: cycle
                     });
                 }
-                
                 await apiCall(`/transactions/bulk`, 'POST', { transactions: newTransactions });
             }
             closeModal(); 
-            render(); // รีโหลดข้อมูลจาก DB ใหม่
+            render(); 
         }
 
-        // ==========================================
-        // 🗑️ ลบข้อมูล (DELETE)
-        // ==========================================
         async function deleteItem(id) {
             if(confirm('ลบรายการนี้ใช่หรือไม่?')) {
-                // 🌟 ส่ง ID ผ่านเครื่องหมาย ? (Query Parameter)
                 await apiCall(`/transactions?id=${id}`, 'DELETE');
                 render(); 
             }
         }
 
         // ==========================================
-        // ⚙️ ส่วน Fix Cost 
+        // ⚙️ ระบบ Fix Cost
         // ==========================================
         function openSettings() {
             document.getElementById('settings-modal').classList.remove('hidden');
@@ -390,13 +441,9 @@
             const amount = document.getElementById('set-amount').value;
             if(!title || !amount) return;
             
-            // 📡 POST: ส่งข้อมูลไปบันทึกลง Database
             await apiCall(`/fix-costs`, 'POST', { title, amount: parseFloat(amount) });
-            
             document.getElementById('set-title').value = '';
             document.getElementById('set-amount').value = '';
-            
-            // 🌟 โหลดข้อมูลทั้งหมดใหม่ 
             render(); 
         }
 
@@ -417,27 +464,21 @@
         async function applyFixCosts() {
             const cycle = monthInput.value;
             const logs = fixTemplates.map(t => ({ 
-                title: t.title, 
-                amount: t.amount, 
-                tx_date: `${cycle}-01`, // บันทึกวันที่ 1
-                cycle: cycle,
-                type: 'fix-cost' 
+                title: t.title, amount: t.amount, tx_date: `${cycle}-01`, cycle: cycle, type: 'fix-cost' 
             }));
-            
             await apiCall(`/transactions/bulk`, 'POST', { transactions: logs });
             render();
         }
 
         async function removeFixTemplate(id) {
             if(confirm('ยืนยันการลบต้นแบบรายการนี้?')) {
-                // 🌟 แก้ไข: ส่ง ID ไปลบใน Database ผ่าน Query Parameter ให้ตรงกับระบบ
                 await apiCall(`/fix-costs?id=${id}`, 'DELETE');
                 render();
             }
         }
 
         // ==========================================
-        // UI & Scroll Management
+        // UI Interactions & Modals
         // ==========================================
         let isShrunk = false;
         scrollContainer.addEventListener('scroll', () => {
@@ -460,8 +501,6 @@
                 document.getElementById('in-title').value = item.title;
                 document.getElementById('in-amount').value = item.amount;
                 document.getElementById('in-type').value = item.type;
-                
-                // แปลง Format วันที่กลับมาใส่ใน Input Date
                 const dateObj = new Date(item.tx_date);
                 document.getElementById('in-date').value = dateObj.toISOString().split('T')[0];
                 recurringField.style.display = 'none';
@@ -479,8 +518,8 @@
         function closeModal() { document.getElementById('modal').classList.remove('modal-active'); }
         function editItem(id) { openModal(id); }
 
-        // Start Boot Application
-        render();
+        // 🚀 สั่งเริ่มแอปเมื่อโหลดหน้าเว็บเสร็จ (จะเช็ค LINE ก่อน)
+        window.onload = initializeApp;
     </script>
 </body>
 </html>
