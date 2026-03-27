@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Wallet Pro - Monthly Report</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;700&display=swap');
+        body { font-family: 'Kanit', sans-serif; background: #f1f5f9; -webkit-tap-highlight-color: transparent; }
+        
+        /* Loading Overlay */
+        #loader { transition: opacity 0.3s ease; z-index: 999; }
+        .hide-loader { opacity: 0; pointer-events: none; }
+        
+        /* ซ่อนปุ่มต่างๆ เวลาปริ้น PDF */
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white; }
+            #printable-area { box-shadow: none; padding: 0; }
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 text-slate-800">
+
+    <div id="loader" class="fixed inset-0 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center">
+        <i class="fas fa-circle-notch fa-spin text-4xl text-indigo-500 mb-4"></i>
+        <p class="text-slate-600 font-bold">กำลังดึงข้อมูลรายงาน...</p>
+    </div>
+
+    <div class="max-w-4xl mx-auto flex flex-wrap justify-between items-center mb-6 gap-4 no-print">
+        <button onclick="window.location.href='index.html'" class="bg-white px-5 py-2.5 rounded-2xl shadow-sm hover:shadow-md text-slate-600 font-bold transition flex items-center gap-2 border border-slate-200">
+            <i class="fas fa-arrow-left"></i> กลับหน้าแอป
+        </button>
+        
+        <div class="flex items-center gap-3">
+            <input type="month" id="report-cycle" onchange="loadReport()" class="bg-white border border-slate-200 rounded-2xl px-4 py-2.5 shadow-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-300 cursor-pointer">
+            <button onclick="exportPDF()" class="bg-rose-500 text-white px-5 py-2.5 rounded-2xl shadow-md hover:bg-rose-600 font-bold transition flex items-center gap-2">
+                <i class="fas fa-file-pdf"></i> โหลด PDF
+            </button>
+        </div>
+    </div>
+
+    <div id="printable-area" class="max-w-4xl mx-auto bg-white p-8 sm:p-12 shadow-xl rounded-3xl border border-slate-100">
+        
+        <div class="text-center mb-10 border-b-2 border-slate-100 pb-8">
+            <div class="flex justify-center mb-4">
+                <div class="w-16 h-16 bg-indigo-100 text-indigo-500 rounded-full flex items-center justify-center text-3xl">
+                    <i class="fas fa-wallet"></i>
+                </div>
+            </div>
+            <h1 class="text-3xl sm:text-4xl font-black text-slate-800 mb-2">รายงานสรุปรายรับ-รายจ่าย</h1>
+            <p class="text-slate-500 font-bold text-lg" id="report-month-title">ประจำเดือน: ...</p>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4 mb-10">
+            <div class="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 text-center">
+                <p class="text-[11px] font-bold uppercase tracking-widest text-emerald-600 mb-1">รายรับรวม</p>
+                <p id="sum-income" class="text-xl sm:text-2xl font-black text-emerald-600">฿0.00</p>
+            </div>
+            <div class="bg-rose-50 border border-rose-100 rounded-2xl p-4 text-center">
+                <p class="text-[11px] font-bold uppercase tracking-widest text-rose-600 mb-1">รายจ่ายรวม</p>
+                <p id="sum-expense" class="text-xl sm:text-2xl font-black text-rose-600">฿0.00</p>
+            </div>
+            <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-center">
+                <p class="text-[11px] font-bold uppercase tracking-widest text-indigo-600 mb-1">ยอดคงเหลือ</p>
+                <p id="sum-balance" class="text-xl sm:text-2xl font-black text-indigo-600">฿0.00</p>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="bg-slate-50 text-slate-500 text-sm border-y border-slate-200">
+                        <th class="p-4 font-bold">วันที่</th>
+                        <th class="p-4 font-bold">รายการ</th>
+                        <th class="p-4 font-bold text-center">ประเภท</th>
+                        <th class="p-4 font-bold text-right">จำนวนเงิน (บาท)</th>
+                    </tr>
+                </thead>
+                <tbody id="report-table-body" class="text-sm font-medium">
+                    </tbody>
+            </table>
+        </div>
+        
+        <div class="mt-12 text-center text-slate-400 text-xs font-bold">
+            <p>สร้างโดย Smart Wallet Pro</p>
+            <p id="print-timestamp"></p>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 🔴 ตั้งค่า API และ LIFF (ใช้ชุดเดียวกับ index.html)
+        // ==========================================
+        const API_BASE_URL = 'https://n8n.nex2gether.site/webhook/api/v1'; 
+        const LIFF_ID = '2009499939-W8xCco2X'; // <--- ⚠️ ใส่ LIFF ID ตัวเดิม
+        
+        let CURRENT_UID = ''; 
+        const monthInput = document.getElementById('report-cycle');
+        const loader = document.getElementById('loader');
+        
+        // ตั้งค่าเดือนปัจจุบัน
+        const today = new Date();
+        monthInput.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+
+        // ==========================================
+        // 🟢 ตรวจสอบการ Login
+        // ==========================================
+        async function initializeApp() {
+            try {
+                await liff.init({ liffId: LIFF_ID });
+                if (liff.isLoggedIn()) {
+                    const profile = await liff.getProfile();
+                    CURRENT_UID = profile.userId; 
+                    loadReport(); 
+                } else {
+                    // ถ้ายังไม่ login ให้เด้งกลับไปหน้าแรก
+                    window.location.href = 'index.html';
+                }
+            } catch (err) {
+                console.error('LIFF Error:', err);
+                CURRENT_UID = '6d000a47-29ad-11f1-99a0-0ed3e82fa1a0'; // Mock สำหรับทดสอบ
+                loadReport();
+            }
+        }
+
+        function showLoader() { loader.classList.remove('hide-loader'); }
+        function hideLoader() { loader.classList.add('hide-loader'); }
+
+        // ==========================================
+        // 🔄 ดึงข้อมูลและวาดตาราง
+        // ==========================================
+        async function loadReport() {
+            showLoader();
+            try {
+                const cycle = monthInput.value;
+                
+                // อัปเดตหัวข้อรายงาน
+                const [year, month] = cycle.split('-');
+                const monthNames = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+                document.getElementById('report-month-title').innerText = `ประจำเดือน: ${monthNames[parseInt(month)-1]} ${year}`;
+                
+                // ยิง API
+                let separator = '/transactions'.includes('?') ? '&' : '?';
+                const response = await fetch(`${API_BASE_URL}/transactions?cycle=${cycle}${separator}uid=${CURRENT_UID}`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const rawData = await response.json();
+                
+                // แปลงข้อมูลให้เป็น Array
+                let items = [];
+                if (Array.isArray(rawData)) items = rawData; 
+                else if (rawData && Array.isArray(rawData.data)) items = rawData.data; 
+                else if (rawData && rawData.id) items = [rawData]; 
+
+                renderTable(items);
+            } catch (error) {
+                console.error("Error loading report:", error);
+                alert("ไม่สามารถดึงข้อมูลรายงานได้");
+            } finally {
+                hideLoader();
+            }
+        }
+
+        function renderTable(items) {
+            const tbody = document.getElementById('report-table-body');
+            tbody.innerHTML = '';
+            
+            let inc = 0, exp = 0;
+
+            // เรียงวันที่จากเก่าไปใหม่ (ให้ดูง่ายๆ เป็น Report)
+            items.sort((a,b) => new Date(a.tx_date) - new Date(b.tx_date));
+
+            if(items.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-slate-400">ไม่มีรายการในเดือนนี้</td></tr>`;
+            }
+
+            items.forEach(item => {
+                const isIncome = item.type === 'income';
+                const amount = Number(item.amount);
+                if(isIncome) inc += amount; else exp += amount;
+
+                // แปลง Format วันที่
+                const dateObj = new Date(item.tx_date);
+                const dateStr = `${String(dateObj.getDate()).padStart(2,'0')}/${String(dateObj.getMonth()+1).padStart(2,'0')}/${dateObj.getFullYear()}`;
+
+                // ป้ายประเภท
+                let typeBadge = '';
+                if(item.type === 'income') typeBadge = '<span class="bg-emerald-100 text-emerald-600 px-2 py-1 rounded-md text-[10px] font-black tracking-wider uppercase">รายรับ</span>';
+                else if(item.type === 'fix-cost') typeBadge = '<span class="bg-amber-100 text-amber-600 px-2 py-1 rounded-md text-[10px] font-black tracking-wider uppercase">Fix Cost</span>';
+                else typeBadge = '<span class="bg-rose-100 text-rose-600 px-2 py-1 rounded-md text-[10px] font-black tracking-wider uppercase">รายจ่าย</span>';
+
+                const tr = document.createElement('tr');
+                tr.className = "border-b border-slate-100 hover:bg-slate-50 transition";
+                tr.innerHTML = `
+                    <td class="p-4 text-slate-500">${dateStr}</td>
+                    <td class="p-4 text-slate-700 font-bold">${item.title}</td>
+                    <td class="p-4 text-center">${typeBadge}</td>
+                    <td class="p-4 text-right font-black ${isIncome ? 'text-emerald-500' : 'text-slate-600'}">
+                        ${isIncome ? '' : '-'}฿${amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // อัปเดตยอดรวม
+            document.getElementById('sum-income').innerText = `฿${inc.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            document.getElementById('sum-expense').innerText = `฿${exp.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            document.getElementById('sum-balance').innerText = `฿${(inc - exp).toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            
+            // อัปเดตเวลาพิมพ์
+            const now = new Date();
+            document.getElementById('print-timestamp').innerText = `พิมพ์เมื่อ: ${now.toLocaleString('th-TH')}`;
+        }
+
+        // ==========================================
+        // 📄 สร้างและดาวน์โหลด PDF
+        // ==========================================
+        function exportPDF() {
+            const element = document.getElementById('printable-area');
+            const cycle = monthInput.value;
+            
+            const opt = {
+                margin:       10,
+                filename:     `SmartWallet_Report_${cycle}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            // ซ่อนปุ่มโหลดก่อนแปลงชั่วคราว (กันพลาด)
+            html2pdf().set(opt).from(element).save();
+        }
+
+        // เริ่มต้นระบบ
+        window.onload = initializeApp;
+    </script>
+</body>
+</html>
