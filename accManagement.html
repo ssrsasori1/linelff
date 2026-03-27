@@ -161,10 +161,9 @@
         // 🔴 ตั้งค่า API ตรงนี้! (เปลี่ยนเป็นลิงก์ n8n ของคุณ)
         // ==========================================
         const API_BASE_URL = 'https://n8n.nex2gether.site/webhook/api/v1'; 
-        
-        // 🌟 ดึง UID จาก URL (เช่น index.html?uid=12345)
         const urlParams = new URLSearchParams(window.location.search);
-        const CURRENT_UID = urlParams.get('uid') || 'usr-5555'; // ถ้าไม่มีให้ใช้ usr-5555 เป็นค่าเริ่มต้น
+        const CURRENT_UID = urlParams.get('uid') || '6d000a47-29ad-11f1-99a0-0ed3e82fa1a0'; // ถ้าไม่มีให้ใช้ usr-5555 เป็นค่าเริ่มต้น
+
 
         // State ควบคุมข้อมูล
         let currentItems = [];
@@ -185,22 +184,22 @@
         async function apiCall(endpoint, method = 'GET', body = null) {
             showLoader();
             try {
-                // 🌟 แนบ uid ไปกับ URL อัตโนมัติทุกเส้นทาง
-                let separator = endpoint.includes('?') ? '&' : '?';
-                let finalUrl = `${API_BASE_URL}${endpoint}${separator}uid=${CURRENT_UID}`;
-
                 const options = {
                     method,
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-User-ID': CURRENT_UID // ส่ง UID ลับไปกับ Header ป้องกันคนแฮก!
+                    }
                 };
                 if (body) options.body = JSON.stringify(body);
                 
-                const response = await fetch(finalUrl, options);
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
                 
                 if (!response.ok) {
                     throw new Error(`API Error: ${response.status}`);
                 }
 
+                // ดักจับกรณีที่ n8n ไม่ได้ส่งอะไรกลับมา (เช่น ตอน DELETE)
                 const text = await response.text();
                 return text ? JSON.parse(text) : { status: 'success' };
 
@@ -219,31 +218,35 @@
         // ==========================================
         // 🔄 ฟังก์ชันหลัก: โหลดข้อมูลจาก Database
         // ==========================================
-        async function render() {
+        // ==========================================
+        // 🔄 ฟังก์ชันหลัก: โหลดข้อมูลจาก Database
+        // ==========================================
+       async function render() {
             const cycle = monthInput.value;
             
-            // 📡 GET: ดึง Transactions
+            // 📡 ยิง API ดึงทั้ง 2 ตาราง
             const txData = await apiCall(`/transactions?cycle=${cycle}`);
-            // 📡 GET: ดึง Fix Costs
             const fixData = await apiCall(`/fix-costs`); 
 
-            // จัดการข้อมูลให้เป็น Array เสมอ ไม่ว่า n8n จะส่งมาแบบไหน
+            // จัดการข้อมูล Transactions
             if (Array.isArray(txData)) currentItems = txData; 
             else if (txData && Array.isArray(txData.data)) currentItems = txData.data; 
             else if (txData && txData.id) currentItems = [txData]; 
             else currentItems = []; 
-
+            
+            // 🌟 จัดการข้อมูล Fix Cost Templates
             if (Array.isArray(fixData)) fixTemplates = fixData; 
             else if (fixData && Array.isArray(fixData.data)) fixTemplates = fixData.data; 
             else if (fixData && fixData.id) fixTemplates = [fixData]; 
             else fixTemplates = []; 
-            
+
             updateUI(currentItems);
-            renderSettingsList();
+            // 🌟 ให้วาดหน้าจอ Settings ใหม่ด้วยข้อมูลจาก DB
+            renderSettingsList(); 
         }
 
         // ==========================================
-        // 🎨 ฟังก์ชันวาด UI
+        // 🎨 ฟังก์ชันวาด UI (เหมือนเดิมเป๊ะ แต่เปลี่ยน item.date เป็น item.tx_date ให้ตรงกับ DB)
         // ==========================================
         function updateUI(items) {
             const listItems = document.getElementById('list-items');
@@ -258,6 +261,7 @@
                 const amount = Number(item.amount);
                 if(isIncome) inc += amount; else exp += amount;
 
+                // การแยกวันที่จาก DB (บางที MySQL จะส่งมาเป็น 2024-03-01T00:00:00.000Z)
                 const txDate = new Date(item.tx_date).toLocaleDateString('th-TH', {day:'2-digit', month:'short'});
 
                 const card = document.createElement('div');
@@ -307,6 +311,7 @@
         function updateSuggestions() {
             const container = document.getElementById('suggestions');
             container.innerHTML = '';
+            // ใช้ประวัติเฉพาะของเดือนนี้ที่ดึงมา (ถ้าอยากได้ทั้งหมดอาจจะต้องเก็บ State แยกไว้)
             const uniqueTitles = [...new Set(currentItems.map(i => i.title))].slice(0, 5);
             uniqueTitles.forEach(title => {
                 const chip = document.createElement('span');
@@ -331,15 +336,17 @@
             if(!title || !amount) return;
 
             if (editId) {
-                // 📡 PUT: ส่ง ID ยัดไปใน Payload เพื่อให้อัปเดตได้ตรงจุด
+                // 📡 PUT: อัปเดตรายการเดิม (อย่าลืมสร้างโหนด PUT ใน n8n ถ้ายากให้ใช้ DELETE แล้ว POST ใหม่แทนได้ครับ)
                 const payload = { 
-                    id: editId,
+                    id: editId,  // เพิ่มบรรทัดนี้ส่ง ID ไปด้วย
                     title, 
                     amount: parseFloat(amount), 
                     type, 
                     tx_date: document.getElementById('in-date').value, 
                     cycle: monthInput.value 
                 };
+                
+                // ยิงไปที่ /transactions ตรงๆ เลย
                 await apiCall(`/transactions`, 'PUT', payload);
             } else {
                 // 📡 POST: สร้างรายการใหม่ (รวมแบบล่วงหน้า)
@@ -353,14 +360,15 @@
                         title: repeatMonths > 1 ? `${title} (${i+1}/${repeatMonths})` : title,
                         amount: parseFloat(amount),
                         type,
-                        tx_date: targetDate.toISOString().split('T')[0],
+                        tx_date: targetDate.toISOString().split('T')[0], // สำคัญ! Database ใช้ tx_date
                         cycle: cycle
                     });
                 }
+                
                 await apiCall(`/transactions/bulk`, 'POST', { transactions: newTransactions });
             }
             closeModal(); 
-            render(); 
+            render(); // รีโหลดข้อมูลจาก DB ใหม่
         }
 
         // ==========================================
@@ -368,14 +376,14 @@
         // ==========================================
         async function deleteItem(id) {
             if(confirm('ลบรายการนี้ใช่หรือไม่?')) {
-                // 📡 DELETE: ส่ง ID ผ่าน URL Query Parameter เพื่อความปลอดภัย
+                // 🌟 แก้ไข: เปลี่ยนมาส่ง ID ผ่านเครื่องหมาย ? (Query Parameter) แทน
                 await apiCall(`/transactions?id=${id}`, 'DELETE');
                 render(); 
             }
         }
 
         // ==========================================
-        // ⚙️ ส่วน Fix Cost
+        // ⚙️ ส่วน Fix Cost (เหมือนเดิม แค่ครอบด้วย API)
         // ==========================================
         function openSettings() {
             document.getElementById('settings-modal').classList.remove('hidden');
@@ -388,20 +396,14 @@
             const amount = document.getElementById('set-amount').value;
             if(!title || !amount) return;
             
-            // 📡 POST: สร้างต้นแบบ Fix Cost
+            // 📡 POST: ส่งข้อมูลไปบันทึกลง Database
             await apiCall(`/fix-costs`, 'POST', { title, amount: parseFloat(amount) });
             
             document.getElementById('set-title').value = '';
             document.getElementById('set-amount').value = '';
-            render();
-        }
-
-        async function removeFixTemplate(id) {
-            if(confirm('ยืนยันการลบต้นแบบรายการนี้?')) {
-                // 📡 DELETE: ลบต้นแบบ Fix Cost โดยใช้ Query Parameter
-                await apiCall(`/fix-costs?id=${id}`, 'DELETE');
-                render();
-            }
+            
+            // 🌟 โหลดข้อมูลทั้งหมดใหม่ เพื่อให้ได้ UUID ของจริงจาก Database มาใช้งานF
+            render(); 
         }
 
         function renderSettingsList() {
@@ -423,13 +425,20 @@
             const logs = fixTemplates.map(t => ({ 
                 title: t.title, 
                 amount: t.amount, 
-                tx_date: `${cycle}-01`, 
+                tx_date: `${cycle}-01`, // บันทึกวันที่ 1
                 cycle: cycle,
                 type: 'fix-cost' 
             }));
             
             await apiCall(`/transactions/bulk`, 'POST', { transactions: logs });
             render();
+        }
+        async function removeFixTemplate(id) {
+            if(confirm('ยืนยันการลบต้นแบบรายการนี้?')) {
+                // 📡 DELETE: ส่ง ID ไปลบใน Database
+                await apiCall(`/fix-costs/${id}`, 'DELETE');
+                render();
+            }
         }
 
         // ==========================================
@@ -457,6 +466,7 @@
                 document.getElementById('in-amount').value = item.amount;
                 document.getElementById('in-type').value = item.type;
                 
+                // แปลง Format วันที่กลับมาใส่ใน Input Date
                 const dateObj = new Date(item.tx_date);
                 document.getElementById('in-date').value = dateObj.toISOString().split('T')[0];
                 recurringField.style.display = 'none';
